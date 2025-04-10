@@ -1,0 +1,207 @@
+---
+title: "Web scraping, R for Data Science (2e)"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rvest)
+```
+
+# Extracting data
+To get started scraping, you’ll need the URL of the page you want to scrape, which you can usually copy from your web browser. You’ll then need to read the HTML for that page into R with `read_html()`. This returns an `xml_document` object which you’ll then manipulate using `rvest` functions.
+```{r}
+url <- "https://hass-taskforce.github.io/webscRaping/"
+#url <- "C:/Users/mquiroga/Repositories/webscRaping/index.html"
+html <- read_html(url)
+html
+```
+
+## Finding elements
+
+You can get a long way with just three elements:
+
+- `p` selects all `<p>` elements (this can be done with any tag)
+
+- `.title` selects all elements with the CSS class “title”.
+
+- `#title` selects the element with the CSS id attribute that equals “title”. CSS id attributes must be unique within a document, so this will only ever select a single element.
+
+Use `html_elements()` to find all elements that match the selector:
+```{r}
+html |> html_elements("p")
+```
+
+By class:
+```{r}
+html |> html_elements(".important")
+```
+
+By id:
+```{r}
+html |> html_elements("#first")
+```
+
+Another important function is `html_element()` which always returns the same number of outputs as inputs. If you apply it to a whole document it’ll give you the first match:
+```{r}
+html |> html_element("p")
+```
+
+There’s an important difference between `html_element()` and `html_elements()` when you use a selector that doesn’t match any elements. `html_elements()` returns a vector of length 0, where `html_element()` returns a missing value. This will be important shortly.
+```{r}
+html |> html_elements("img")
+```
+
+```{r}
+html |> html_element("img")
+```
+
+## Nesting selections
+In most cases, you’ll use `html_elements()` and `html_element()` together, typically using `html_elements()` to identify elements that will become observations then using `html_element()` to find elements that will become variables. Let’s see this in action using a simple example. Here we have an unordered list (`<ul>`) where each list item (`<li>`) contains some information about four characters from StarWars.
+
+```{r}
+html |> html_element("ul")
+```
+
+We can use `html_elements()` to make a vector where each element corresponds to a different character:
+```{r}
+characters <- html |> html_elements("li")
+characters
+```
+
+To extract the name of each character, we use `html_element()`, because when applied to the output of `html_elements()` it’s guaranteed to return one response per element:
+```{r}
+characters |> html_element("b")
+```
+
+The distinction between `html_element()` and `html_elements()` isn’t important for name, but it is important for weight. We want to get one weight for each character, even if there’s no weight `<span>`. That’s what `html_element()` does:
+```{r}
+characters |> html_element(".weight")
+```
+
+`html_elements()` finds all weight `<span>`s that are children of characters. There’s only three of these, so we lose the connection between names and weights:
+```{r}
+characters |> html_elements(".weight")
+```
+
+## Text and attributes
+
+`html_text2()` extracts the plain text contents of an HTML element:
+```{r}
+characters |> 
+  html_element("b") |> 
+  html_text2()
+```
+
+```{r}
+characters |> 
+  html_element(".weight") |> 
+  html_text2()
+```
+
+`html_attr()` extracts data from attributes:
+```{r}
+html |> 
+  html_elements("p") |> 
+  html_element("a") |> 
+  html_attr("href")
+```
+
+## Tables
+
+If you’re lucky, your data will be already stored in an HTML table, and it’ll be a matter of just reading it from that table. It’s usually straightforward to recognize a table in your browser: it’ll have a rectangular structure of rows and columns, and you can copy and paste it into a tool like Excel.
+
+HTML tables are built up from four main elements: `<table>`, `<tr>` (table row), `<th>` (table heading), and `<td>` (table data). Here’s a simple HTML table with two columns and three rows.
+
+`rvest` provides a function that knows how to read this sort of data: `html_table()`. It returns a list containing one tibble for each table found on the page. Use `html_element()` to identify the table you want to extract:
+```{r}
+html |> 
+  html_element(".mytable") |> 
+  html_table()
+```
+
+# Finding the right selectors
+Figuring out the selector you need for your data is typically the hardest part of the problem. You’ll often need to do some experimenting to find a selector that is both specific (i.e. it doesn’t select things you don’t care about) and sensitive (i.e. it does select everything you care about). Lots of trial and error is a normal part of the process! There are two main tools that are available to help you with this process: [SelectorGadget](https://rvest.tidyverse.org/articles/selectorgadget.html) and your browser’s developer tools.
+
+## EXERCISE!!!
+Have a look at this page: https://rvest.tidyverse.org/articles/starwars.html
+
+```{r}
+url <- "https://rvest.tidyverse.org/articles/starwars.html"
+html <- read_html(url)
+```
+
+Right click on one of the headings that’s the title of a Star Wars movie, and select "Inspect Element". Use the keyboard or mouse to explore the hierarchy of the HTML and see if you can get a sense of the shared structure used by each movie.
+
+Our goal is to turn this data into a 7 row data frame with variables: `title`, `year`, `director`, and `intro`. We’ll start by reading the HTML and extracting all the <section> elements:
+```{r}
+section <- html |> html_elements("section")
+section
+```
+
+This retrieves seven elements matching the seven movies found on that page, suggesting that using section as a selector is good. Extracting the individual elements is straightforward since the data is always found in the text. It’s just a matter of finding the right selector:
+```{r}
+section |> html_element("h2") |> html_text2()
+```
+
+```{r}
+section |> html_element(".director") |> html_text2()
+```
+
+Once we’ve done that for each component, we can wrap all the results up into a tibble:
+```{r}
+tibble(
+  title = section |> 
+    html_element("h2") |> 
+    html_text2(),
+  released = section |> 
+    html_element("p") |> 
+    html_text2() |> 
+    str_remove("Released: ") |> 
+    parse_date(),
+  director = section |> 
+    html_element(".director") |> 
+    html_text2(),
+  intro = section |> 
+    html_element(".crawl") |> 
+    html_text2()
+)
+```
+
+# Dynamic sites
+So far we have focused on websites where `html_elements()` returns what you see in the browser and discussed how to parse what it returns and how to organize that information in tidy data frames. From time-to-time, however, you’ll hit a site where `html_elements()` and friends don’t return anything like what you see in the browser. In many cases, that’s because you’re trying to scrape a website that dynamically generates the content of the page with javascript. This doesn’t currently work with `rvest`, because `rvest` downloads the raw HTML and doesn’t run any javascript.
+
+It’s still possible to scrape these types of sites, but `rvest` needs to use a more expensive process: fully simulating the web browser including running all javascript. This functionality is not available at the time of writing, but it’s something we’re actively working on and might be available by the time you read this. It uses the `chromote` package which actually runs the Chrome browser in the background, and gives you additional tools to interact with the site, like a human typing text and clicking buttons. Check out the `rvest` website for more details.
+
+## Static example
+```{r}
+url <- "https://rvest.tidyverse.org/articles/starwars.html"
+html <- read_html(url)
+
+html |>
+  html_elements("section")
+```
+
+## Dynamic example
+```{r}
+url <- "https://rvest.tidyverse.org/dev/articles/starwars-dynamic.html"
+html <- read_html(url)
+
+html |>
+  html_elements("section")
+
+html <- read_html_live(url)
+
+html |>
+  html_elements("section")
+```
+
+# Summary
+
+In this lecture, you’ve learned about the why, the why not, and the how of scraping data from web pages. First, you’ve learned about the basics of HTML and using CSS selectors to refer to specific elements, then you’ve learned about using the `rvest` package to get data out of HTML into R.
+
+Technical details of scraping data off the web can be complex, particularly when dealing with sites, however legal and ethical considerations can be even more complex. It’s important for you to educate yourself about both of these before setting out to scrape data.

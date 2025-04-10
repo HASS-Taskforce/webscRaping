@@ -1,0 +1,121 @@
+---
+title: "Movie box sales"
+author: "Mar Quiroga"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(rvest)
+```
+
+# Read in webpage
+
+We can look at https://www.boxofficemojo.com/weekly/.
+
+```{r}
+url <- "https://www.boxofficemojo.com/weekly/2025W13/"
+
+html <- rvest::read_html(url)
+```
+
+# Is it stored as a table?
+
+```{r}
+week13 <- html |>
+  rvest::html_table() |>
+  _[[1]] |>
+  dplyr::mutate(week = 13)
+```
+
+# Change urls to do it all as one
+
+```{r}
+get_table <- function(this_week) {
+  rvest::read_html(paste0("https://www.boxofficemojo.com/weekly/2025W", this_week, "/")) |>
+  rvest::html_table() |>
+  _[[1]]
+}
+
+week <- 1:13
+
+weekly_data <- tibble(week) |>
+  mutate(
+    data = map(formatC(week, width = 2, format = "d", flag = "0"), get_table)
+  ) |>
+  unnest(data)
+```
+
+# Plot Gross
+
+```{r}
+weekly_data |>
+  ggplot(aes(x = week, y = Gross, color = Release, group = Release)) +
+  geom_point() +
+  geom_line() +
+  theme(legend.position="none")
+```
+
+# Too many movies to see what's going on!
+
+Let's try choosing only the ones that have ranked at the top for at least one week this year
+```{r}
+top_ranking <- weekly_data |>
+  filter(Rank == 1) |>
+  pull(Release) |>
+  unique()
+
+weekly_data |>
+  filter(Release %in% top_ranking) |>
+  ggplot(aes(x = week, y = Gross, color = Release, group = Release)) +
+  geom_point() +
+  geom_line() +
+  theme_minimal()
+```
+
+What's happening with our y axis???
+
+```{r}
+clean_data <- weekly_data |>
+  mutate(gross_format = as.numeric(str_remove_all(Gross, "[\\$,]")))
+
+released_2024 <- weekly_data |>
+  filter(Weeks == 1) |>
+  pull(Release)
+
+clean_data |>
+  filter(Release %in% top_ranking & Release %in% released_2024) |>
+  ggplot(aes(x = week, y = gross_format, color = Release, group = Release)) +
+  geom_point() +
+  geom_line() +
+  scale_colour_brewer(palette = "Set1") +
+  theme_minimal()
+```
+
+
+Maybe we look at movies that had the biggest increases in gross relative to the previous week+
+
+```{r}
+clean_data <- clean_data |>
+  rename(change_lw = "%± LW") |>
+  mutate(change_lw = as.numeric(str_remove_all(change_lw, "[\\%,+]")))
+
+weekly_increases <- clean_data |>
+  arrange(desc(change_lw)) |>
+  _[1:9,] |>
+  pull(Release)
+
+clean_data |>
+  filter(Release %in% weekly_increases) |>
+  ggplot(aes(x = week, y = gross_format, color = Release, group = Release)) +
+  geom_point() +
+  geom_line() +
+  scale_colour_brewer(palette = "Set1") +
+  theme_minimal()
+```
+
